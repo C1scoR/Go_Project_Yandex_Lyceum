@@ -53,19 +53,19 @@ func NewAgent() *Agent {
 // Загружаем конфиг
 func ConfigFromEnv() *Config {
 	config := new(Config)
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal("Ошибка получения домашней директории:", err)
-	}
+	// home, err := os.UserHomeDir()
+	// if err != nil {
+	// 	log.Fatal("Ошибка получения домашней директории:", err)
+	// }
 
-	err = godotenv.Load(home + "/GO_projects/internal/orchestrator/.env")
+	err := godotenv.Load("C:/Users/G3eb/all_go_projects/GO_projects/internal/orchestrator/.env")
 	if err != nil {
 		log.Println("Ошибка загрузки .env файла:", err)
 	}
 
 	config.Addr = os.Getenv("PORT_AGENT")
 	config.OrchestratorURL = "http://localhost:8080/internal/task"
-	config.PollInterval = 1 * time.Second // Интервал между запросами задач
+	config.PollInterval = 10 * time.Millisecond // Интервал между запросами задач
 	return config
 }
 

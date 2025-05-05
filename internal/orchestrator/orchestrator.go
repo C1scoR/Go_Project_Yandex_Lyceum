@@ -15,6 +15,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/C1scoR/Go_Project_Yandex_Lyceum/internal/database/config"
+	"github.com/C1scoR/Go_Project_Yandex_Lyceum/internal/database/handlers"
+	configjwt "github.com/C1scoR/Go_Project_Yandex_Lyceum/internal/jwt/config"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
@@ -75,12 +78,12 @@ type ResponseOfSecondServer struct {
 
 func ConfigFromEnv() *Config {
 	config := new(Config)
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal("Ошибка получения домашней директории:", err)
-	}
+	//home, err := os.UserHomeDir()
+	// if err != nil {
+	// 	log.Fatal("Ошибка получения домашней директории:", err)
+	// }
 
-	err = godotenv.Load(home + "/GO_projects/internal/orchestrator/.env")
+	err := godotenv.Load("C:/Users/G3eb/all_go_projects/GO_projects/internal/orchestrator/.env") // Load .env if exists
 	if err != nil {
 		log.Println("Ошибка загрузки .env файла:", err)
 	}
@@ -321,6 +324,8 @@ func OrchestratorHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// Эта функция параллельно и рекурсивно раскладывает дерево
+// Если она находит свободную связку для вычисления (по типу 4+5), то передаёт её в канал
 func CollectComputableNodes(node *Node, queue chan *Node, wg *sync.WaitGroup) {
 	defer wg.Done() // Уменьшаем счетчик wg при выходе из горутины
 
@@ -371,13 +376,13 @@ func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Нет выражений для вычисления абсолютно", http.StatusNotFound)
 		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal("Ошибка получения домашней директории в Обработчике:", err)
-		return
-	}
+	// home, err := os.UserHomeDir()
+	// if err != nil {
+	// 	log.Fatal("Ошибка получения домашней директории в Обработчике:", err)
+	// 	return
+	// }
 
-	err = godotenv.Load(home + "/GO_projects/internal/orchestrator/.env")
+	err := godotenv.Load("C:/Users/G3eb/all_go_projects/GO_projects/internal/orchestrator/.env")
 	if err != nil {
 		log.Println("Ошибка загрузки .env файла в Обработчике:", err)
 		return
@@ -418,6 +423,7 @@ func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request
 		mutex.Lock()
 		defer mutex.Unlock()
 		mapMutex.Lock()
+		//итеррируемся по каналу, в которой записываем значения из функции CollectComputableNodes
 		for Atomic_Node := range queue {
 			if Atomic_Node.Status == StatusFree {
 				Atomic_Node.Status = StatusRestrict
@@ -602,13 +608,24 @@ func GetExpressionByIdHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (orch *Orchestrator) RunServer() error {
+	DBcfg := config.ConfigDB()
+	defer DBcfg.DB.Close()
+	JWTcfg, err := configjwt.LoadJWT()
+	authHandler := handlers.NewAuthHandler(DBcfg, []byte(JWTcfg.Secret))
+	if err != nil {
+		return err
+	}
 	log.Println("Сервера маму люблю, порт: ", orch.config.Addr)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/calculate", OrchestratorHandler)
-	mux.HandleFunc("/api/v1/expressions", GetExpressionsHandler)
-	mux.HandleFunc("/api/v1/expressions/", GetExpressionByIdHandler)
-	mux.HandleFunc("/internal/task", HandlerForCommunicationToOtherServer)
-	err := http.ListenAndServe(":"+orch.config.Addr, mux)
+	mux.HandleFunc("/api/v1/register", authHandler.Register)
+	mux.HandleFunc("/api/v1/login", authHandler.Login)
+	protectedMux := http.NewServeMux()
+	protectedMux.HandleFunc("/api/v1/refresh-token", authHandler.Refresh)
+	protectedMux.HandleFunc("/api/v1/calculate", OrchestratorHandler)
+	protectedMux.HandleFunc("/api/v1/expressions", GetExpressionsHandler)
+	protectedMux.HandleFunc("/api/v1/expressions/", GetExpressionByIdHandler)
+	protectedMux.HandleFunc("/internal/task", HandlerForCommunicationToOtherServer)
+	err = http.ListenAndServe(":"+orch.config.Addr, mux)
 	if err != nil {
 		return err
 	}

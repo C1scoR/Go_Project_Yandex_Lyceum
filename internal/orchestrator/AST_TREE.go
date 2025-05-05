@@ -25,6 +25,7 @@ func NewNode(value string) *Node {
 	}
 }
 
+// рекурсивно обходит дерево и печатает все его значения
 func PrintOrder(node *Node) {
 	if node == nil {
 		return

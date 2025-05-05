@@ -1,2 +1,7 @@
 .env
 .vscode/
+calc_go/
+criteria.md
+main_a.exe
+main_b.exe
+orchestrator.exe
