@@ -5,3 +5,5 @@ criteria.md
 main_a.exe
 main_b.exe
 orchestrator.exe
+test_package/
+app.db

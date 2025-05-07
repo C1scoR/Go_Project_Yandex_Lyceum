@@ -25,9 +25,9 @@ type Task struct {
 
 // Конфиг агента
 type Config struct {
-	Addr            string
 	OrchestratorURL string
 	PollInterval    time.Duration
+	SuperSecretKey  string
 }
 
 // Agent — сам агент
@@ -63,18 +63,33 @@ func ConfigFromEnv() *Config {
 		log.Println("Ошибка загрузки .env файла:", err)
 	}
 
-	config.Addr = os.Getenv("PORT_AGENT")
 	config.OrchestratorURL = "http://localhost:8080/internal/task"
-	config.PollInterval = 10 * time.Millisecond // Интервал между запросами задач
+	config.PollInterval = 5 * time.Second // Интервал между запросами задач
+	config.SuperSecretKey = Getenv("SUPER_SECRET_KEY", "super-secret")
 	return config
+}
+
+func Getenv(key, default_value string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return default_value
 }
 
 // Запрашиваем задания у оркестратора
 func fetchExpressions(agent *Agent) {
 	for {
-		resp, err := http.Get(agent.config.OrchestratorURL)
+		req, err := http.NewRequest("GET", agent.config.OrchestratorURL, nil)
 		if err != nil {
-			log.Println("Ошибка при запросе задач:", err)
+			log.Println("Agent/fetchExpressions(): Ошибка при создании GET запроса")
+			time.Sleep(agent.config.PollInterval)
+			continue
+		}
+
+		req.Header.Set("X-Agent-Key", agent.config.SuperSecretKey)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Println("Agent/fetchExpressions():Ошибка при запросе задач:", err)
 			time.Sleep(agent.config.PollInterval)
 			continue
 		}
@@ -117,8 +132,14 @@ func sendResult(data DataForSend, agent *Agent) {
 		log.Println("Ошибка маршалинга результата:", err)
 		return
 	}
-
-	resp, err := http.Post(agent.config.OrchestratorURL, "application/json", bytes.NewBuffer(payload))
+	log.Println("Отправляю ответ...")
+	req, err := http.NewRequest("POST", agent.config.OrchestratorURL, bytes.NewBuffer(payload))
+	if err != nil {
+		log.Println("Agent()/SendResult(): Ошибка создания клиента:", err)
+		return
+	}
+	req.Header.Set("X-Agent-Key", agent.config.SuperSecretKey)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Println("Ошибка отправки результата:", err)
 		return

@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package protofile;
+option go_package = "proto/proto_file";
+import "google/protobuf/duration.proto";
+service OrchAgent {
+    rpc AgentOrchGet() returns (stream Task) {}
+    rpc AgentOrchPost(ResponseOfSecondServer) returns () {}
+}
+
+message Task {
+    string ID = 1;
+    string Arg1 = 2;
+    string Arg3 = 3;
+    string Operation = 4;
+    google.protobuf.duration Operation_time = 5;
+}
+
+message ResponseOfSecondServer {
+    string ID = 1;
+    string result = 2;
+}
+

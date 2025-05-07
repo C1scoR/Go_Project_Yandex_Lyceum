@@ -47,7 +47,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var exists bool
-	err = h.db.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", user.Email).Scan(&exists)
+	err = h.db.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", user.Email).Scan(&exists)
 	if err != nil {
 		fmt.Fprintf(w, "%q", err)
 		log.Println("handlers/func Register(): ", err)
@@ -73,7 +73,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	var id int
 	err = tx.QueryRow(`INSERT INTO users (email, password_hash) 
-        VALUES ($1, $2) 
+        VALUES (?, ?) 
         RETURNING id`, user.Email, hashedPassword).Scan(&id)
 	if err != nil {
 		tx.Rollback()
@@ -95,6 +95,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
+	log.Println("пользователь был зарегистрирован:")
 }
 
 // Обрабатывает Аутентификацию и jwt генерацию
@@ -111,7 +112,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	err = h.db.DB.QueryRow(`
         SELECT id, email, password_hash 
         FROM users 
-        WHERE email = $1`,
+        WHERE email = ?`,
 		login.Email,
 	).Scan(&user.ID, &user.Email, &user.PasswordHash)
 	if err == sql.ErrNoRows {
@@ -164,16 +165,20 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // RefreshToken генерирует новый токен для залогининых пользователей
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	//Получаем ID пользоватея через контекст (от middleware)
-	userID, exists := r.Context().Value("user_id").(string)
-	if !exists {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		log.Println("handlers/func RefreshToken(): ошибка доставания id из контекста")
-		return
-	}
+	//	userID, exists := r.Context().Value("user_id").(string)
+	ID := r.Context().Value("user_id").(float64)
+	userID := int(ID)
+	userEmail := r.Context().Value("email").(string)
+	// if !exists {
+	// 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	// 	log.Println("handlers/func RefreshToken(): ошибка доставания id из контекста")
+	// 	return
+	// }
 	// Создаём новый токен
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"user_id": userID,
+		"email":   userEmail,
 		"iat":     now.Unix(),
 		"exp":     now.Add(h.tokenExpiration).Unix(),
 	}
@@ -192,6 +197,22 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		Token:      tokenString,
 		Expires_in: h.tokenExpiration.Seconds(),
 		Token_type: "Bearer",
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
+}
+
+func (h *AuthHandler) GetUserData(w http.ResponseWriter, r *http.Request) {
+	id := r.Context().Value("user_id").(float64)
+	user_id := int(id)
+	email := r.Context().Value("email").(string)
+	response := struct {
+		ID    int
+		Email string
+	}{
+		ID:    user_id,
+		Email: email,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

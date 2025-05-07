@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/C1scoR/Go_Project_Yandex_Lyceum/internal/database/config"
 	"github.com/C1scoR/Go_Project_Yandex_Lyceum/internal/database/handlers"
+	middleware "github.com/C1scoR/Go_Project_Yandex_Lyceum/internal/database/middleware"
 	configjwt "github.com/C1scoR/Go_Project_Yandex_Lyceum/internal/jwt/config"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -62,13 +64,6 @@ type Orchestrator struct {
 }
 
 // структура для закодирования тасков, которые потом пойдут к агенту
-type Task struct {
-	Id             string        `json:"id"`
-	Arg1           string        `json:"Arg1"`
-	Arg2           string        `json:"Arg2"`
-	Operation      string        `json:"Operation"`
-	Operation_time time.Duration `json:"Operation_time"`
-}
 
 // Структура для распарсивания отета агента
 type ResponseOfSecondServer struct {
@@ -280,6 +275,17 @@ type Request struct {
 	Expression string `json:"expression"`
 }
 
+var DB *sql.DB
+
+func init() {
+	var err error
+	DB, err = sql.Open("sqlite3", "./internal/database/app.db")
+	if err != nil {
+		log.Fatalf("Orchestrator/Init(): произошла ошибка подключения к БД: %q", err)
+	}
+}
+
+// OrchestratorHandler Получает выражение на вход и добалвяет его в очередь для вычисления
 func OrchestratorHandler(w http.ResponseWriter, r *http.Request) {
 	var request Request
 	//проверка на json
@@ -309,7 +315,8 @@ func OrchestratorHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
+	id_float64 := r.Context().Value("user_id").(float64)
+	user_id := int(id_float64)
 	id := uuid.New().String()
 
 	//Вот тут мы отправляем пользователю ответ
@@ -318,9 +325,17 @@ func OrchestratorHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id": id,
 	})
+
 	//ВАЖНО!!! ДОБАВЛЯЮ ЭЛЕМЕНТ В ОЧЕРЕДЬ
 	AppendToQueue(Expressions_parametres{id, StatusCreated, request.Expression})
 	//atomic.AddInt32(&iterrator_global, 1)
+	//Добавляю выражение в БД
+	_, err = DB.Exec("INSERT INTO statements (user_id, statement_id, statement) VALUES (?, ?, ?)", user_id, id, request.Expression)
+	if err != nil {
+		log.Println("Ошибка вставки выражения в Базу Данных", err)
+		http.Error(w, "Ошибка вставки в БД", http.StatusInternalServerError)
+		return
+	}
 
 }
 
@@ -365,6 +380,14 @@ var (
 	iterrator_global         int32
 	mutex                    sync.Mutex // Мьютекс для других синхронизаций
 )
+
+type Task struct {
+	Id             string        `json:"id"`
+	Arg1           string        `json:"Arg1"`
+	Arg2           string        `json:"Arg2"`
+	Operation      string        `json:"Operation"`
+	Operation_time time.Duration `json:"Operation_time"`
+}
 
 func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request) {
 	map_for_input_variables := make(map[string]*Node)
@@ -495,6 +518,7 @@ func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request
 		defer r.Body.Close()
 		var response ResponseOfSecondServer
 		err = json.Unmarshal(body, &response)
+		log.Println("Результат, который пришёл (надеюсь): ", response.Id, response.Result)
 		if err != nil {
 			log.Println("Что-то не так с unmarshal json", err)
 			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
@@ -520,6 +544,11 @@ func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request
 			log.Println("Записываем выражение в корень в result массива больших выражений")
 			Expressions_storage_variable.Expressions[iterrator].Result = root_of_AST_TREE.value
 			Expressions_storage_variable.Expressions[iterrator].Status = StatusExecuted
+			//Добавление результата выражения в БД
+			_, err := DB.Exec("UPDATE statements SET result = ? WHERE statement_id = ?", root_of_AST_TREE.value, Expressions_storage_variable.Expressions[iterrator].ID)
+			if err != nil {
+				log.Println("orchestrator/HandlerForCommunicationToOtherServer():\n Ошибка вставки результата выражения в БД", err)
+			}
 			for k := range map_for_output_variables {
 				delete(map_for_output_variables, k)
 			}
@@ -535,76 +564,108 @@ func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	//если ошибки нет, значит в корне уже стоит число
-	//если стоит число, то мы в массив expression подставляем result.
-	//Только вот вопрос а как дальше итерироваться, потому что это же пизда, ну типа либо заводить глобальный счётчик, либо я хуй знает, как стэк эту залупу юзать, где
-	//мы вставляем элемент и берём последний вставленный на вычисления, а как только досчитали, то прихуячиваем его в самое начало массива
 
 }
 
 func GetExpressionsHandler(w http.ResponseWriter, r *http.Request) {
-	if len(Expressions_storage_variable.Expressions) == 0 {
-		log.Println("Запрос на данные, но данных нет")
+	id := r.Context().Value("user_id").(float64)
+	user_id := int(id)
+	var statement_id, statement, result string
+	rows, err := DB.Query("SELECT statement_id, statement, result FROM statements WHERE user_id = ?", user_id)
+	if err == sql.ErrNoRows {
+		log.Println("orchestrator/GetExpressionsHandler(): В Базу данных ещё не было добавлено ни одного выражения: ErrNoRows")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+		jsonData := struct {
+			Error string
+		}{
+			Error: "Вы ещё не делали запросы с выражениями",
+		}
+		json.NewEncoder(w).Encode(jsonData)
+		return
+	}
+	if err != nil {
+		log.Println("orchestrator/GetExpressionsHandler(): Неизвестная ошибка при получении строк БД", err)
+		http.Error(w, " Неизвестная ошибка при получении строк БД", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	type Expression struct {
+		Statement_id string `json:"statement_id"`
+		Statement    string `json:"statement"`
+		Result       string `json:"result"`
+	}
 
-		response := map[string]string{"error": "There are no expressions in Database"}
-		jsonData, err := json.Marshal(response)
+	var expressions []Expression
+
+	for rows.Next() {
+		err := rows.Scan(&statement_id, &statement, &result)
 		if err != nil {
-			http.Error(w, `{"error": "unknown error"}`, http.StatusInternalServerError)
+			log.Println("orchestrator/GetExpressionsHandler(): Неизвестная ошибка итерации по строкам", err)
+			http.Error(w, " Неизвестная ошибка", http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write(jsonData)
-		return
-	} else {
-		for i := 0; i < len(Expressions_storage_variable.Expressions); i++ {
-			jsonData, err := json.MarshalIndent(Expressions_storage_variable.Expressions[i], "", " ")
-			if err != nil {
-				log.Println("Что-то пошло не так при маршализации json")
-				http.Error(w, "unknown error", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, err = w.Write(jsonData)
-			if err != nil {
-				http.Error(w, "Ошибка при отправке данных", http.StatusInternalServerError)
-				log.Println("Ошибка при отправке данных:", err)
-				return
-			}
-		}
+		expressions = append(expressions, Expression{Statement_id: statement_id, Statement: statement, Result: result})
 	}
+	if len(expressions) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+		jsonData := struct {
+			Error string
+		}{
+			Error: "Вы ещё не делали запросы на выражения",
+		}
+		json.NewEncoder(w).Encode(jsonData)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(expressions)
 }
 
 func GetExpressionByIdHandler(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 5 {
-		log.Println()
 		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
 	}
 	id := parts[4]
-	for _, expression := range Expressions_storage_variable.Expressions {
-		if expression.ID == id {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			jsonData, err := json.MarshalIndent(expression, "", " ")
-			if err != nil {
-				http.Error(w, "Ошибка при отправке данных", http.StatusInternalServerError)
-				log.Println("Данные не закодировались в json, в GetExpressionByIdHandler")
-				return
-			}
-			_, err = w.Write([]byte(jsonData))
-			if err != nil {
-				http.Error(w, "Ошибка при отправке данных", http.StatusInternalServerError)
-				log.Println("Что-то случилось при отправке json-данных пользователю", err)
-				return
-			}
-			return
-		}
+	user_id_float64 := r.Context().Value("user_id").(float64)
+	userID := int(user_id_float64)
+	var uID int
+	var statement_id, statement, result string
+	err := DB.QueryRow("SELECT user_id, statement_id, statement, result FROM statements WHERE statement_id = ?", id).Scan(&uID, &statement_id, &statement, &result)
+	if userID != uID {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, "It's not yours expression: ", http.StatusForbidden)
+		return
 	}
-	http.Error(w, "Такого выражения нет", http.StatusNotFound)
-	log.Println("Пользователь захотел несуществующее выражение")
+	if err == sql.ErrNoRows {
+		log.Println("orchestrator/GetExpressionByIdHandler(): В Базу данных ещё не было добавлено такого выражения: ErrNoRows")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNoContent)
+		jsonData := struct {
+			Error string
+		}{
+			Error: "Такого выражения не существует",
+		}
+		json.NewEncoder(w).Encode(jsonData)
+		return
+	}
+	if err != nil {
+		log.Println("orchestrator/GetExpressionByIdHandler() Неизвестная ошибка при получении строки БД", err)
+		http.Error(w, " Неизвестная ошибка при получении строки БД", http.StatusInternalServerError)
+		return
+	}
+
+	type Expression struct {
+		Statement_id string `json:"statement_id"`
+		Statement    string `json:"statement"`
+		Result       string `json:"result"`
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(Expression{Statement_id: statement_id, Statement: statement, Result: result})
 }
 
 func (orch *Orchestrator) RunServer() error {
@@ -617,17 +678,34 @@ func (orch *Orchestrator) RunServer() error {
 	}
 	log.Println("Сервера маму люблю, порт: ", orch.config.Addr)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/register", authHandler.Register)
-	mux.HandleFunc("/api/v1/login", authHandler.Login)
+	timeout := time.Second * 10
+	mux.Handle("/internal/task", middleware.AgentKeyMiddleware("super-secret")(http.HandlerFunc(HandlerForCommunicationToOtherServer)))
+	mux.Handle("/api/v1/login", middleware.ContextMiddleware(timeout)(http.HandlerFunc(authHandler.Login)))
+	mux.Handle("/api/v1/register", middleware.ContextMiddleware(timeout)(http.HandlerFunc(authHandler.Register)))
 	protectedMux := http.NewServeMux()
-	protectedMux.HandleFunc("/api/v1/refresh-token", authHandler.Refresh)
+	protectedMux.HandleFunc("/api/v1/refresh-token", authHandler.RefreshToken)
 	protectedMux.HandleFunc("/api/v1/calculate", OrchestratorHandler)
 	protectedMux.HandleFunc("/api/v1/expressions", GetExpressionsHandler)
 	protectedMux.HandleFunc("/api/v1/expressions/", GetExpressionByIdHandler)
-	protectedMux.HandleFunc("/internal/task", HandlerForCommunicationToOtherServer)
-	err = http.ListenAndServe(":"+orch.config.Addr, mux)
+	protectedMux.HandleFunc("/api/v1/profile", authHandler.GetUserData)
+	protectedHandler := middleware.AuthMiddleware([]byte(JWTcfg.Secret))(protectedMux)
+	finalHandler := SplitHandler(mux, protectedHandler)
+	err = http.ListenAndServe(":"+orch.config.Addr, finalHandler)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func SplitHandler(public, protected http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/refresh-token") ||
+			strings.HasPrefix(r.URL.Path, "/api/v1/profile") ||
+			strings.HasPrefix(r.URL.Path, "/api/v1/calculate") ||
+			strings.HasPrefix(r.URL.Path, "/api/v1/expressions") {
+			protected.ServeHTTP(w, r)
+			return
+		}
+		public.ServeHTTP(w, r)
+	})
 }

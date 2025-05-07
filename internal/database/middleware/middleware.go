@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"context"
@@ -9,14 +9,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/time/rate"
-)
-
-type contextKey string
-
-const (
-	userIDKey contextKey = "user_id"
-	emailKey  contextKey = "email"
-	roleKey   contextKey = "role"
 )
 
 func AuthMiddleware(jwtSecret []byte) func(http.Handler) http.Handler {
@@ -61,10 +53,10 @@ func AuthMiddleware(jwtSecret []byte) func(http.Handler) http.Handler {
 					return
 				}
 			}
-			ctx := context.WithValue(r.Context(), userIDKey, claims["user_id"])
-			ctx = context.WithValue(ctx, emailKey, claims["email"])
-
-			next.ServeHTTP(w, r.WithContext(ctx))
+			ctx := context.WithValue(r.Context(), "user_id", claims["user_id"])
+			ctx = context.WithValue(ctx, "email", claims["email"])
+			r = r.WithContext(ctx)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
@@ -78,6 +70,36 @@ func RateLimiterMiddleware() func(http.Handler) http.Handler {
 			if !limiter.Allow() {
 				return
 			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func AgentKeyMiddleware(expectedKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("X-Agent-Key")
+			if key != expectedKey {
+				//log.Println("middleware/AgentKeyMiddleware(): Не дай бог тут идёт запрет на общение агента с оркестратором")
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func ContextMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set a timeout for the request context
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+			defer cancel()
+
+			// Create a new request with the updated context
+			r = r.WithContext(ctx)
+
+			// Call the next handler with the new context
 			next.ServeHTTP(w, r)
 		})
 	}

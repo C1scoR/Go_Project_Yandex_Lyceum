@@ -17,7 +17,7 @@ func ConfigDB() *Litedb {
 	var err error
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	DB, err := sql.Open("sqlite3", "./database/app.db")
+	DB, err := sql.Open("sqlite3", "./internal/database/app.db")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func ConfigDB() *Litedb {
 	// Обновляем переодично соединение с БД
 	DB.SetConnMaxLifetime(5 * time.Minute)
 	if err = DB.PingContext(ctx); err != nil {
-		log.Fatalf("Подключение к базе данных не было выполнено успешно: %q", err)
+		log.Fatalf("database/config/config.goПодключение к базе данных не было выполнено успешно: %q", err)
 	}
 	sqlStatement1 := `
 	CREATE TABLE IF NOT EXISTS users (
@@ -38,8 +38,9 @@ func ConfigDB() *Litedb {
   		password_hash TEXT NOT NULL);`
 	sqlStatement2 := `CREATE TABLE IF NOT EXISTS statements (
 		user_id INTEGER,
+		statement_id TEXT PRIMARY KEY,
 		statement TEXT,
-		statement_status TEXT,
+		result TEXT,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE);
 		`
 	_, err = DB.ExecContext(ctx, sqlStatement1)
