@@ -75,19 +75,20 @@ func RateLimiterMiddleware() func(http.Handler) http.Handler {
 	}
 }
 
-func AgentKeyMiddleware(expectedKey string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := r.Header.Get("X-Agent-Key")
-			if key != expectedKey {
-				//log.Println("middleware/AgentKeyMiddleware(): Не дай бог тут идёт запрет на общение агента с оркестратором")
-				http.Error(w, "Forbidden", http.StatusForbidden)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
+//При общении по-другому хосту, а он такой и будет на grpc я не вижу смысла защищать обмен добавлением заголовка
+// func AgentKeyMiddleware(expectedKey string) func(http.Handler) http.Handler {
+// 	return func(next http.Handler) http.Handler {
+// 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 			key := r.Header.Get("X-Agent-Key")
+// 			if key != expectedKey {
+// 				//log.Println("middleware/AgentKeyMiddleware(): Не дай бог тут идёт запрет на общение агента с оркестратором")
+// 				http.Error(w, "Forbidden", http.StatusForbidden)
+// 				return
+// 			}
+// 			next.ServeHTTP(w, r)
+// 		})
+// 	}
+// }
 
 func ContextMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

@@ -7,7 +7,6 @@ import (
 // В этой функции main будет производиться запуск оркестратора и миграции баз данных
 func main() {
 	app := orchestrator.New()
-
-	//app.Run()
+	go orchestrator.RunGRPCServer()
 	app.RunServer()
 }

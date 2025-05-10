@@ -7,3 +7,7 @@ main_b.exe
 orchestrator.exe
 test_package/
 app.db
+.exe
+main.exe
+orchestrator_grpc.exe
+agent.exe

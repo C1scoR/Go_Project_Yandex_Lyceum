@@ -89,7 +89,6 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	response := map[string]interface{}{
 		"message": "User registered successfully",
-		"user_id": id,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

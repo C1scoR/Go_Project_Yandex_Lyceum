@@ -1,23 +1,27 @@
 syntax = "proto3";
-
-package protofile;
-option go_package = "proto/proto_file";
 import "google/protobuf/duration.proto";
+package proto;
+option go_package = "proto/proto_file.proto";
 service OrchAgent {
-    rpc AgentOrchGet() returns (stream Task) {}
-    rpc AgentOrchPost(ResponseOfSecondServer) returns () {}
+    rpc AgentOrchGet(AgentRequest) returns (stream Task) {}
+    rpc AgentOrchPost(ResponseOfSecondServer) returns (OrchResponse) {}
 }
-
+//Задачи которые будут отправлять от оркестратора к агенту
 message Task {
     string ID = 1;
     string Arg1 = 2;
-    string Arg3 = 3;
+    string Arg2 = 3;
     string Operation = 4;
-    google.protobuf.duration Operation_time = 5;
+    google.protobuf.Duration Operation_time = 5; 
 }
-
+//Задачи которые будут передаваться от агента к оркестратору
+// ака ResponseOfSecondServer как у меня написано в пакете orchestrator
 message ResponseOfSecondServer {
     string ID = 1;
-    string result = 2;
+    double result = 2;
 }
+//Это чтобы имтировать get запрос, потому что почему-то его просто с пустым телом функции нельзя написать
+message AgentRequest {}
+//Это чтобы тоже proto файл не ругался
+message OrchResponse {}
 

@@ -5,14 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -78,9 +76,9 @@ func ConfigFromEnv() *Config {
 	// 	log.Fatal("Ошибка получения домашней директории:", err)
 	// }
 
-	err := godotenv.Load("C:/Users/G3eb/all_go_projects/GO_projects/internal/orchestrator/.env") // Load .env if exists
+	err := godotenv.Load("./internal/orchestrator/.env")
 	if err != nil {
-		log.Println("Ошибка загрузки .env файла:", err)
+		log.Fatalln("orchestrator/ConfigFromEnv(): Ошибка загрузки .env файла:", err)
 	}
 	config.Addr = os.Getenv("PORT_ORCHESTRATOR")
 	return config
@@ -318,6 +316,7 @@ func OrchestratorHandler(w http.ResponseWriter, r *http.Request) {
 	id_float64 := r.Context().Value("user_id").(float64)
 	user_id := int(id_float64)
 	id := uuid.New().String()
+	//fmt.Println("ID который я должен вытащить: ", id)
 
 	//Вот тут мы отправляем пользователю ответ
 	w.Header().Set("Content-Type", "application/json")
@@ -328,6 +327,7 @@ func OrchestratorHandler(w http.ResponseWriter, r *http.Request) {
 
 	//ВАЖНО!!! ДОБАВЛЯЮ ЭЛЕМЕНТ В ОЧЕРЕДЬ
 	AppendToQueue(Expressions_parametres{id, StatusCreated, request.Expression})
+	//log.Printf("orchestrator/OrchestratorHandler(): элемент был добавлен в очередь, %T длина очереди: %d", Expressions_storage_variable.Expressions, len(Expressions_storage_variable.Expressions))
 	//atomic.AddInt32(&iterrator_global, 1)
 	//Добавляю выражение в БД
 	_, err = DB.Exec("INSERT INTO statements (user_id, statement_id, statement) VALUES (?, ?, ?)", user_id, id, request.Expression)
@@ -374,12 +374,11 @@ func CollectComputableNodes(node *Node, queue chan *Node, wg *sync.WaitGroup) {
 	}
 }
 
-var (
-	map_for_output_variables = make(map[string]*Node)
-	mapMutex                 sync.Mutex // Мьютекс для защиты map
-	iterrator_global         int32
-	mutex                    sync.Mutex // Мьютекс для других синхронизаций
-)
+//глобальные переменные для старого оркестратора
+// var (
+// 	map_for_output_variables = make(map[string]*Node)
+// 	mutex                    sync.Mutex // Мьютекс для других синхронизаций
+// )
 
 type Task struct {
 	Id             string        `json:"id"`
@@ -389,189 +388,189 @@ type Task struct {
 	Operation_time time.Duration `json:"Operation_time"`
 }
 
-func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request) {
-	map_for_input_variables := make(map[string]*Node)
-	for index, exp_value := range Expressions_storage_variable.Expressions {
-		if exp_value.Status == StatusCreated || exp_value.Status == StatusInWork {
-			break
-		} else if (index == len(Expressions_storage_variable.Expressions)-1) && exp_value.Status != StatusCreated {
-			log.Println("Нет выражений для вычисления")
-			http.Error(w, "Нет выражений для вычисления абсолютно", http.StatusNotFound)
-		}
-	}
-	// home, err := os.UserHomeDir()
-	// if err != nil {
-	// 	log.Fatal("Ошибка получения домашней директории в Обработчике:", err)
-	// 	return
-	// }
+//Оркестратор для общения по http - не нужен с появлением gRPC
+// func HandlerForCommunicationToOtherServer(w http.ResponseWriter, r *http.Request) {
+// 	map_for_input_variables := make(map[string]*Node)
+// 	for index, exp_value := range Expressions_storage_variable.Expressions {
+// 		if exp_value.Status == StatusCreated || exp_value.Status == StatusInWork {
+// 			break
+// 		} else if (index == len(Expressions_storage_variable.Expressions)-1) && exp_value.Status != StatusCreated {
+// 			log.Println("Нет выражений для вычисления")
+// 			http.Error(w, "Нет выражений для вычисления абсолютно", http.StatusNotFound)
+// 		}
+// 	}
+// 	// home, err := os.UserHomeDir()
+// 	// if err != nil {
+// 	// 	log.Fatal("Ошибка получения домашней директории в Обработчике:", err)
+// 	// 	return
+// 	// }
 
-	err := godotenv.Load("C:/Users/G3eb/all_go_projects/GO_projects/internal/orchestrator/.env")
-	if err != nil {
-		log.Println("Ошибка загрузки .env файла в Обработчике:", err)
-		return
-	}
+// 	err := godotenv.Load()
+// 	if err != nil {
+// 		log.Fatalln("orchestrator/HandlerForCommunicationToOtherServer(): Ошибка загрузки .env файла в Обработчике:", err)
+// 		return
+// 	}
 
-	iterrator := atomic.LoadInt32(&iterrator_global)
-	//log.Print(iterrator)
-	if Expressions_storage_variable.Expressions[iterrator].Status == StatusCreated {
-		//Эта часть с созданием дерева выполнится 1 раз, для 1-го выражения
-		var err error
-		Postfix_array, err := InfixToPostfix(Expressions_storage_variable.Expressions[iterrator].Result)
-		if err != nil {
-			log.Println("Something went wrong throw convertation of expression")
-			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
-			http.Error(w, fmt.Sprintf("Something went wrong throw convertation of expression, error status: %d", http.StatusUnprocessableEntity), http.StatusUnprocessableEntity)
-			return
-		}
-		root_of_AST_TREE = TranslateToASTTree(Postfix_array)
-		Expressions_storage_variable.Expressions[iterrator].Status = StatusInWork
-	}
-	//Если приходит Get запрос, то мы разбиваем наше дерево. Находим задачи, которые можно вычислить параллельно, через канал добавляем их в 2 очереди
-	//и в тело post запроса кладём сразу столько элементов, сколько накопилось в очереди
-	//Одну из очередей чистим, вторую чистим когда придёт post-запрос с ответом
-	if r.Method == http.MethodGet {
-		if root_of_AST_TREE == nil {
-			log.Println("У нас пустой корень дерева")
-			http.Error(w, "Пустой корень дерева", http.StatusBadRequest)
-			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
-			return
-		}
-		var wg sync.WaitGroup
-		queue := make(chan *Node, 100)
+// 	iterrator := atomic.LoadInt32(&iterrator_global)
+// 	//log.Print(iterrator)
+// 	if Expressions_storage_variable.Expressions[iterrator].Status == StatusCreated {
+// 		//Эта часть с созданием дерева выполнится 1 раз, для 1-го выражения
+// 		var err error
+// 		Postfix_array, err := InfixToPostfix(Expressions_storage_variable.Expressions[iterrator].Result)
+// 		if err != nil {
+// 			log.Println("Something went wrong throw convertation of expression")
+// 			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
+// 			http.Error(w, fmt.Sprintf("Something went wrong throw convertation of expression, error status: %d", http.StatusUnprocessableEntity), http.StatusUnprocessableEntity)
+// 			return
+// 		}
+// 		root_of_AST_TREE = TranslateToASTTree(Postfix_array)
+// 		Expressions_storage_variable.Expressions[iterrator].Status = StatusInWork
+// 	}
+// 	//Если приходит Get запрос, то мы разбиваем наше дерево. Находим задачи, которые можно вычислить параллельно, через канал добавляем их в 2 очереди
+// 	//и в тело post запроса кладём сразу столько элементов, сколько накопилось в очереди
+// 	//Одну из очередей чистим, вторую чистим когда придёт post-запрос с ответом
+// 	if r.Method == http.MethodGet {
+// 		if root_of_AST_TREE == nil {
+// 			log.Println("У нас пустой корень дерева")
+// 			http.Error(w, "Пустой корень дерева", http.StatusBadRequest)
+// 			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
+// 			return
+// 		}
+// 		var wg sync.WaitGroup
+// 		queue := make(chan *Node, 100)
 
-		wg.Add(1)
-		go CollectComputableNodes(root_of_AST_TREE, queue, &wg)
-		wg.Wait()
-		close(queue)
-		mutex.Lock()
-		defer mutex.Unlock()
-		mapMutex.Lock()
-		//итеррируемся по каналу, в которой записываем значения из функции CollectComputableNodes
-		for Atomic_Node := range queue {
-			if Atomic_Node.Status == StatusFree {
-				Atomic_Node.Status = StatusRestrict
-				id := uuid.New().String()
-				map_for_output_variables[id] = Atomic_Node //вот здесь я записываю в мапу id и ноды, чтобы потом по id агента сервера можно было взять ноду и поменять её значение на
-				//результат присланный агентом
-				map_for_input_variables[id] = Atomic_Node
-			}
-		}
-		mapMutex.Unlock()
-		log.Print(map_for_output_variables) ////////////////////
-		var tasks_array []Task
-		mapMutex.Lock()
-		for key, node_value := range map_for_input_variables {
-			task := Task{}
-			task.Id = key
-			task.Arg1 = node_value.left.value
-			task.Arg2 = node_value.right.value
-			task.Operation = node_value.value
-			if task.Operation == "+" {
-				Time_Addition_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_ADDITION_MS"))
-				if err != nil {
-					log.Println("Ошибка преобразования TIME_ADDITION_MS:", err)
-				}
-				task.Operation_time = time.Duration(Time_Addition_ms_int_value) * time.Millisecond
-			} else if task.Operation == "-" {
-				Time_Subtraction_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_SUBTRACTION_MS"))
-				if err != nil {
-					log.Println("Ошибка преобразования TIME_SUBTRACTION_MS:", err)
-				}
-				task.Operation_time = time.Duration(Time_Subtraction_ms_int_value) * time.Millisecond
-			} else if task.Operation == "*" {
-				Time_Multiplication_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_MULTIPLICATIONS_MS"))
-				if err != nil {
-					log.Println("Ошибка преобразования TIME_MULTIPLICATIONS_MS:", err)
-				}
-				task.Operation_time = time.Duration(Time_Multiplication_ms_int_value) * time.Millisecond
+// 		wg.Add(1)
+// 		go CollectComputableNodes(root_of_AST_TREE, queue, &wg)
+// 		wg.Wait()
+// 		close(queue)
+// 		mutex.Lock()
+// 		defer mutex.Unlock()
+// 		mapMutex.Lock()
+// 		//итеррируемся по каналу, в которой записываем значения из функции CollectComputableNodes
+// 		for Atomic_Node := range queue {
+// 			if Atomic_Node.Status == StatusFree {
+// 				Atomic_Node.Status = StatusRestrict
+// 				id := uuid.New().String()
+// 				map_for_output_variables[id] = Atomic_Node //вот здесь я записываю в мапу id и ноды, чтобы потом по id агента сервера можно было взять ноду и поменять её значение на
+// 				//результат присланный агентом
+// 				map_for_input_variables[id] = Atomic_Node
+// 			}
+// 		}
+// 		mapMutex.Unlock()
+// 		log.Print(map_for_output_variables) ////////////////////
+// 		var tasks_array []Task
+// 		mapMutex.Lock()
+// 		for key, node_value := range map_for_input_variables {
+// 			task := Task{}
+// 			task.Id = key
+// 			task.Arg1 = node_value.left.value
+// 			task.Arg2 = node_value.right.value
+// 			task.Operation = node_value.value
+// 			if task.Operation == "+" {
+// 				Time_Addition_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_ADDITION_MS"))
+// 				if err != nil {
+// 					log.Println("Ошибка преобразования TIME_ADDITION_MS:", err)
+// 				}
+// 				task.Operation_time = time.Duration(Time_Addition_ms_int_value) * time.Millisecond
+// 			} else if task.Operation == "-" {
+// 				Time_Subtraction_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_SUBTRACTION_MS"))
+// 				if err != nil {
+// 					log.Println("Ошибка преобразования TIME_SUBTRACTION_MS:", err)
+// 				}
+// 				task.Operation_time = time.Duration(Time_Subtraction_ms_int_value) * time.Millisecond
+// 			} else if task.Operation == "*" {
+// 				Time_Multiplication_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_MULTIPLICATIONS_MS"))
+// 				if err != nil {
+// 					log.Println("Ошибка преобразования TIME_MULTIPLICATIONS_MS:", err)
+// 				}
+// 				task.Operation_time = time.Duration(Time_Multiplication_ms_int_value) * time.Millisecond
 
-			} else if task.Operation == "/" {
-				Time_Division_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_DIVISIONS_MS"))
-				if err != nil {
-					log.Println("Ошибка преобразования TIME_DIVISIONS_MS:", err)
-				}
-				task.Operation_time = time.Duration(Time_Division_ms_int_value) * time.Millisecond
-			}
-			tasks_array = append(tasks_array, task)
-		}
-		mapMutex.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		err := json.NewEncoder(w).Encode(tasks_array)
-		if err != nil {
-			log.Println("Не удалось закодировать json в Главном Хэндлере")
-			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
-			http.Error(w, "unknown error", http.StatusInternalServerError)
-			return
-		}
-		//Отправили массив с тасками, и такая отправка может быть на 2+ итерациях. То есть дерево реально обходится несколько раз.
-	}
-	if r.Method == http.MethodPost {
-		//Вот к нам и пришёл запросик с данными
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			log.Println("Что-то не так с чтением тела запроса", err)
-			http.Error(w, "Произошла ошибка с распаршиванием данных", http.StatusUnprocessableEntity)
-			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
-			return
-		}
-		defer r.Body.Close()
-		var response ResponseOfSecondServer
-		err = json.Unmarshal(body, &response)
-		log.Println("Результат, который пришёл (надеюсь): ", response.Id, response.Result)
-		if err != nil {
-			log.Println("Что-то не так с unmarshal json", err)
-			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
-			return
-		}
-		PrintOrder(root_of_AST_TREE)
-		//мы распарсили post-запрос, дальше нам нужно вставить resultы на место Node, которые мы храним в output_map
-		mutex.Lock()
-		defer mutex.Unlock()
-		if node, ok := map_for_output_variables[response.Id]; ok {
-			node.value = fmt.Sprint(response.Result)
-			delete(map_for_output_variables, response.Id)
-			log.Println("Результат успешно обработан для задачи:", response.Id)
-		} else {
-			log.Println("Задача не найдена:", response.Id)
-		}
-	}
-	if root_of_AST_TREE.value == "+" || root_of_AST_TREE.value == "-" || root_of_AST_TREE.value == "*" || root_of_AST_TREE.value == "/" {
-		log.Println("Пока преобразований корня не требуется")
-	} else {
-		_, err = strconv.ParseFloat(root_of_AST_TREE.value, 64)
-		if err == nil {
-			log.Println("Записываем выражение в корень в result массива больших выражений")
-			Expressions_storage_variable.Expressions[iterrator].Result = root_of_AST_TREE.value
-			Expressions_storage_variable.Expressions[iterrator].Status = StatusExecuted
-			//Добавление результата выражения в БД
-			_, err := DB.Exec("UPDATE statements SET result = ? WHERE statement_id = ?", root_of_AST_TREE.value, Expressions_storage_variable.Expressions[iterrator].ID)
-			if err != nil {
-				log.Println("orchestrator/HandlerForCommunicationToOtherServer():\n Ошибка вставки результата выражения в БД", err)
-			}
-			for k := range map_for_output_variables {
-				delete(map_for_output_variables, k)
-			}
-			if iterrator != int32(len(Expressions_storage_variable.Expressions)-1) {
-				atomic.AddInt32(&iterrator_global, 1)
-			} else {
-				log.Println("Если дальше проитерируемся, то функция не выполнится")
-			}
-			return
-		} else {
-			http.Error(w, "Ошибка с преобразованием корня дерева в число", http.StatusUnprocessableEntity)
-			log.Println("Ошибка с преобразованием корня дерева в число")
-			return
-		}
-	}
-
-}
+// 			} else if task.Operation == "/" {
+// 				Time_Division_ms_int_value, err := strconv.Atoi(os.Getenv("TIME_DIVISIONS_MS"))
+// 				if err != nil {
+// 					log.Println("Ошибка преобразования TIME_DIVISIONS_MS:", err)
+// 				}
+// 				task.Operation_time = time.Duration(Time_Division_ms_int_value) * time.Millisecond
+// 			}
+// 			tasks_array = append(tasks_array, task)
+// 		}
+// 		mapMutex.Unlock()
+// 		w.Header().Set("Content-Type", "application/json")
+// 		w.WriteHeader(http.StatusCreated)
+// 		err := json.NewEncoder(w).Encode(tasks_array)
+// 		if err != nil {
+// 			log.Println("Не удалось закодировать json в Главном Хэндлере")
+// 			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
+// 			http.Error(w, "unknown error", http.StatusInternalServerError)
+// 			return
+// 		}
+// 		//Отправили массив с тасками, и такая отправка может быть на 2+ итерациях. То есть дерево реально обходится несколько раз.
+// 	}
+// 	if r.Method == http.MethodPost {
+// 		//Вот к нам и пришёл запросик с данными
+// 		body, err := io.ReadAll(r.Body)
+// 		if err != nil {
+// 			log.Println("Что-то не так с чтением тела запроса", err)
+// 			http.Error(w, "Произошла ошибка с распаршиванием данных", http.StatusUnprocessableEntity)
+// 			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
+// 			return
+// 		}
+// 		defer r.Body.Close()
+// 		var response ResponseOfSecondServer
+// 		err = json.Unmarshal(body, &response)
+// 		log.Println("Результат, который пришёл (надеюсь): ", response.Id, response.Result)
+// 		if err != nil {
+// 			log.Println("Что-то не так с unmarshal json", err)
+// 			Expressions_storage_variable.Expressions[iterrator].Status = StatusFailed
+// 			return
+// 		}
+// 		PrintOrder(root_of_AST_TREE)
+// 		//мы распарсили post-запрос, дальше нам нужно вставить resultы на место Node, которые мы храним в output_map
+// 		mutex.Lock()
+// 		defer mutex.Unlock()
+// 		if node, ok := map_for_output_variables[response.Id]; ok {
+// 			node.value = fmt.Sprint(response.Result)
+// 			delete(map_for_output_variables, response.Id)
+// 			log.Println("Результат успешно обработан для задачи:", response.Id)
+// 		} else {
+// 			log.Println("Задача не найдена:", response.Id)
+// 		}
+// 	}
+// 	if root_of_AST_TREE.value == "+" || root_of_AST_TREE.value == "-" || root_of_AST_TREE.value == "*" || root_of_AST_TREE.value == "/" {
+// 		log.Println("Пока преобразований корня не требуется")
+// 	} else {
+// 		_, err = strconv.ParseFloat(root_of_AST_TREE.value, 64)
+// 		if err == nil {
+// 			log.Println("Записываем выражение в корень в result массива больших выражений")
+// 			Expressions_storage_variable.Expressions[iterrator].Result = root_of_AST_TREE.value
+// 			Expressions_storage_variable.Expressions[iterrator].Status = StatusExecuted
+// 			//Добавление результата выражения в БД
+// 			_, err := DB.Exec("UPDATE statements SET result = ? WHERE statement_id = ?", root_of_AST_TREE.value, Expressions_storage_variable.Expressions[iterrator].ID)
+// 			if err != nil {
+// 				log.Println("orchestrator/HandlerForCommunicationToOtherServer():\n Ошибка вставки результата выражения в БД", err)
+// 			}
+// 			for k := range map_for_output_variables {
+// 				delete(map_for_output_variables, k)
+// 			}
+// 			if iterrator != int32(len(Expressions_storage_variable.Expressions)-1) {
+// 				atomic.AddInt32(&iterrator_global, 1)
+// 			} else {
+// 				log.Println("Если дальше проитерируемся, то функция не выполнится")
+// 			}
+// 			return
+// 		} else {
+// 			http.Error(w, "Ошибка с преобразованием корня дерева в число", http.StatusUnprocessableEntity)
+// 			log.Println("Ошибка с преобразованием корня дерева в число")
+// 			return
+// 		}
+// 	}
+// }
 
 func GetExpressionsHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.Context().Value("user_id").(float64)
 	user_id := int(id)
 	var statement_id, statement, result string
-	rows, err := DB.Query("SELECT statement_id, statement, result FROM statements WHERE user_id = ?", user_id)
+	rows, err := DB.Query("SELECT statement_id, statement, result FROM statements WHERE user_id = ? AND result IS NOT NULL", user_id)
 	if err == sql.ErrNoRows {
 		log.Println("orchestrator/GetExpressionsHandler(): В Базу данных ещё не было добавлено ни одного выражения: ErrNoRows")
 		w.Header().Set("Content-Type", "application/json")
@@ -679,7 +678,7 @@ func (orch *Orchestrator) RunServer() error {
 	log.Println("Сервера маму люблю, порт: ", orch.config.Addr)
 	mux := http.NewServeMux()
 	timeout := time.Second * 10
-	mux.Handle("/internal/task", middleware.AgentKeyMiddleware("super-secret")(http.HandlerFunc(HandlerForCommunicationToOtherServer)))
+	//mux.Handle("/internal/task", middleware.AgentKeyMiddleware("super-secret")(http.HandlerFunc(HandlerForCommunicationToOtherServer)))
 	mux.Handle("/api/v1/login", middleware.ContextMiddleware(timeout)(http.HandlerFunc(authHandler.Login)))
 	mux.Handle("/api/v1/register", middleware.ContextMiddleware(timeout)(http.HandlerFunc(authHandler.Register)))
 	protectedMux := http.NewServeMux()

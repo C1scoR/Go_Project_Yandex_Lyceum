@@ -16,7 +16,10 @@ type JWT struct {
 }
 
 func LoadJWT() (*JWT, error) {
-	godotenv.Load()
+	err := godotenv.Load("./internal/orchestrator/.env")
+	if err != nil {
+		log.Fatalln("jwt/config/LoadJWT(): Не удалось загрузить .env файл", err)
+	}
 	jwt := &JWT{}
 	jwt.Secret = Getenv("JWT_SECRET", "your-secure-secret-key")
 	value, err := strconv.ParseInt(Getenv("TOKEN_EXPIRY", "30"), 10, 64)
