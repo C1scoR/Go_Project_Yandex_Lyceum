@@ -1,18 +1,30 @@
 package agent
 
 import (
+<<<<<<< HEAD
 	"fmt"
 	"log"
+=======
+	"bytes"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+>>>>>>> 686799b (Pushing SuperCalculator)
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
+<<<<<<< HEAD
 	pb "github.com/C1scoR/Go_Project_Yandex_Lyceum/proto"
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/durationpb"
+=======
+	"github.com/joho/godotenv"
+>>>>>>> 686799b (Pushing SuperCalculator)
 )
 
 // Task — структура задания
@@ -24,17 +36,29 @@ type Task struct {
 	Operation_time time.Duration `json:"Operation_time"`
 }
 
+<<<<<<< HEAD
 // Конфиг агента собирается в ConfigFromEnv()
 type Config struct {
 	OrchestratorURL     string //Это для общения с оркестратором по http
 	PollInterval        time.Duration
 	GrpcOrchestratorURL string //Это для общения с оркестратором по grpc
+=======
+// Конфиг агента
+type Config struct {
+	Addr            string
+	OrchestratorURL string
+	PollInterval    time.Duration
+>>>>>>> 686799b (Pushing SuperCalculator)
 }
 
 // Agent — сам агент
 type Agent struct {
 	config *Config
+<<<<<<< HEAD
 	tasks  chan *pb.Task
+=======
+	tasks  chan Task
+>>>>>>> 686799b (Pushing SuperCalculator)
 }
 
 // Структура ответа с результатом
@@ -47,13 +71,18 @@ type DataForSend struct {
 func NewAgent() *Agent {
 	return &Agent{
 		config: ConfigFromEnv(),
+<<<<<<< HEAD
 		tasks:  make(chan *pb.Task, 100),
+=======
+		tasks:  make(chan Task, 100),
+>>>>>>> 686799b (Pushing SuperCalculator)
 	}
 }
 
 // Загружаем конфиг
 func ConfigFromEnv() *Config {
 	config := new(Config)
+<<<<<<< HEAD
 	// home, err := os.UserHomeDir()
 	// if err != nil {
 	// 	log.Fatal("Ошибка получения домашней директории:", err)
@@ -157,6 +186,83 @@ func convertToTimeDuration(pbDuration *durationpb.Duration) (time.Duration, erro
 
 // Воркер, который вычисляет выражения
 func worker(id int, tasks <-chan *pb.Task, wg *sync.WaitGroup, grpcClient pb.OrchAgentClient) {
+=======
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal("Ошибка получения домашней директории:", err)
+	}
+
+	err = godotenv.Load(home + "/GO_projects/internal/orchestrator/.env")
+	if err != nil {
+		log.Println("Ошибка загрузки .env файла:", err)
+	}
+
+	config.Addr = os.Getenv("PORT_AGENT")
+	config.OrchestratorURL = "http://localhost:8080/internal/task"
+	config.PollInterval = 1 * time.Second // Интервал между запросами задач
+	return config
+}
+
+// Запрашиваем задания у оркестратора
+func fetchExpressions(agent *Agent) {
+	for {
+		resp, err := http.Get(agent.config.OrchestratorURL)
+		if err != nil {
+			log.Println("Ошибка при запросе задач:", err)
+			time.Sleep(agent.config.PollInterval)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusCreated {
+			log.Println("Нет задач для выполнения")
+			resp.Body.Close()
+			time.Sleep(agent.config.PollInterval)
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var tasks []Task
+		err = json.Unmarshal(body, &tasks)
+		if err != nil {
+			log.Println("Ошибка при разборе JSON задач:", err)
+			continue
+		}
+
+		// Отправляем задачи по одной и не дублируем
+		for _, task := range tasks {
+			select {
+			case agent.tasks <- task:
+				log.Println("Добавлена задача", task.Id)
+			default:
+				log.Println("Очередь задач заполнена, пропускаем")
+			}
+		}
+
+		time.Sleep(agent.config.PollInterval) // Ждём перед следующим запросом
+	}
+}
+
+// Отправляем результат обратно в оркестратор
+func sendResult(data DataForSend, agent *Agent) {
+	payload, err := json.Marshal(data)
+	if err != nil {
+		log.Println("Ошибка маршалинга результата:", err)
+		return
+	}
+
+	resp, err := http.Post(agent.config.OrchestratorURL, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		log.Println("Ошибка отправки результата:", err)
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// Воркер, который вычисляет выражения
+func worker(id int, tasks <-chan Task, wg *sync.WaitGroup, agent *Agent) {
+>>>>>>> 686799b (Pushing SuperCalculator)
 	defer wg.Done()
 
 	for task := range tasks {
@@ -175,7 +281,11 @@ func worker(id int, tasks <-chan *pb.Task, wg *sync.WaitGroup, grpcClient pb.Orc
 			if Arg2 != 0 {
 				result = Arg1 / Arg2
 			} else {
+<<<<<<< HEAD
 				log.Println("Ошибка: деление на ноль в задаче", task.ID)
+=======
+				log.Println("Ошибка: деление на ноль в задаче", task.Id)
+>>>>>>> 686799b (Pushing SuperCalculator)
 				continue
 			}
 		default:
@@ -183,6 +293,7 @@ func worker(id int, tasks <-chan *pb.Task, wg *sync.WaitGroup, grpcClient pb.Orc
 			continue
 		}
 
+<<<<<<< HEAD
 		log.Printf("Воркер %d: вычислил %s = %.2f\n", id, task.ID, result)
 		d, err := convertToTimeDuration(task.OperationTime)
 		if err != nil {
@@ -191,12 +302,20 @@ func worker(id int, tasks <-chan *pb.Task, wg *sync.WaitGroup, grpcClient pb.Orc
 		time.Sleep(d) // Эмулируем задержку операции
 
 		grpcsendResult(grpcClient, &pb.ResponseOfSecondServer{ID: task.ID, Result: result})
+=======
+		log.Printf("Воркер %d: вычислил %s = %.2f\n", id, task.Id, result)
+
+		time.Sleep(task.Operation_time) // Эмулируем задержку операции
+
+		sendResult(DataForSend{Id: task.Id, Result: result}, agent)
+>>>>>>> 686799b (Pushing SuperCalculator)
 	}
 }
 
 // Запуск агента
 func RunAgent() {
 	agent := NewAgent()
+<<<<<<< HEAD
 	conn, err := grpc.NewClient(agent.config.GrpcOrchestratorURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalln("could not connect to the server")
@@ -204,15 +323,26 @@ func RunAgent() {
 
 	defer conn.Close()
 	grpcClient := pb.NewOrchAgentClient(conn)
+=======
+
+>>>>>>> 686799b (Pushing SuperCalculator)
 	// Запускаем 10 воркеров
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
+<<<<<<< HEAD
 		go worker(i, agent.tasks, &wg, grpcClient)
 	}
 
 	// Запускаем постоянный опрос задач
 	grpcfetchExpression(grpcClient, agent)
+=======
+		go worker(i, agent.tasks, &wg, agent)
+	}
+
+	// Запускаем постоянный опрос задач
+	fetchExpressions(agent)
+>>>>>>> 686799b (Pushing SuperCalculator)
 
 	wg.Wait()
 }

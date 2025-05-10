@@ -142,3 +142,36 @@ func TestGetExpressionByIdHandler(t *testing.T) {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 }
+<<<<<<< HEAD
+=======
+
+func TestHandlerForCommunicationToOtherServer(t *testing.T) {
+	//вот тут по сути шаблон теста, но по факту как-то особо это затестировать тесты нельзя будет :)
+	tests := []struct {
+		name           string
+		method         string
+		expectedStatus int
+	}{
+		{"get tasks", http.MethodGet, http.StatusCreated},
+		{"post results", http.MethodPost, http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(tt.method, "/internal/task", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			rr := httptest.NewRecorder()
+			handler := http.HandlerFunc(HandlerForCommunicationToOtherServer)
+
+			handler.ServeHTTP(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+		})
+	}
+}
+>>>>>>> 686799b (Pushing SuperCalculator)

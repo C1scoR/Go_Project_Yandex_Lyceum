@@ -1,4 +1,5 @@
 .env
+<<<<<<< HEAD
 .vscode/
 calc_go/
 criteria.md
@@ -11,3 +12,6 @@ app.db
 main.exe
 orchestrator_grpc.exe
 agent.exe
+=======
+.vscode/
+>>>>>>> 686799b (Pushing SuperCalculator)

@@ -5,6 +5,9 @@ import (
 )
 
 func main() {
+<<<<<<< HEAD
 
+=======
+>>>>>>> 686799b (Pushing SuperCalculator)
 	agent.RunAgent()
 }
