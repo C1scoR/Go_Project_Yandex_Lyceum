@@ -244,6 +244,10 @@ var Expressions_storage_variable Expressions_storage
 - Выражение получает свой уникальный идентификатор, который создаётся при помощи `uuid`
 - Ставится статус `StatusCreated`
 - В `Result` пока записывается просто само выражение, а не его результат
+Реализацию можете глянуть в `\internal\orhestrator\orchestrator.go`, сигнатура handlerа:
+```go
+func OrchestratorHandler(w http.ResponseWriter, r *http.Request)
+```
 ### **Запрос на все выражения:** 
 - Пользователь делает запрос
 - Middleware проверяет есть ли токен и валиден ли он
