@@ -199,6 +199,7 @@ curl --location 'localhost:<ВАШ_ПОРТ>/api/v1/refresh-token' \
 - Затем хэшируется пароль
 - Открывается транзакция на вставку данных в БД
 - Если всё успешно, то транзакция закрывается и выводится сообщение об успешной регистрации
+
 Реализацию можете глянуть в `internal/database/handlers/handlers.go`.
 Сигнатура:
 ```go
@@ -211,6 +212,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request)
 - Далее проверяется есть ли уже такой пользователь в базе данных
 - Пароль сверяется с его захешированной версией
 - Если всё удачно, то создаётся `jwt` токен, который отправляется пользователю
+
 Реализацию можете глянуть в `internal/database/handlers/handlers.go`.
 Сигнатура:
 ```go
@@ -244,6 +246,7 @@ var Expressions_storage_variable Expressions_storage
 - Выражение получает свой уникальный идентификатор, который создаётся при помощи `uuid`
 - Ставится статус `StatusCreated`
 - В `Result` пока записывается просто само выражение, а не его результат
+
 Реализацию можете глянуть в `\internal\orhestrator\orchestrator.go`, сигнатура handlerа:
 ```go
 func OrchestratorHandler(w http.ResponseWriter, r *http.Request)
@@ -259,7 +262,6 @@ func OrchestratorHandler(w http.ResponseWriter, r *http.Request)
 ```go
 func GetExpressionsHandler(w http.ResponseWriter, r *http.Request) 
 ```
-Уверяю, там абсолютно ничего сложного
 Маленькая поправка:
 Если выражение посчиталось, то будет записан его результат, если выражение не посчиталось, то будет записано само выражение.
 
@@ -283,6 +285,7 @@ func GetExpressionByIdHandler(w http.ResponseWriter, r *http.Request)
 - Middleware парсит из `jwt` и передаёт `id` и `email` пользователя в обработчик по адресу `localhost:<ВАШ_АДРЕС>/api/v1/profile`
 - Из контекста достаются `id` и `email`, собираются в json
 - json отправляется пользователю
+
 Реализацию можете глянуть в `internal/database/handlers/handlers.go`.
 Сигнатура:
 ```go
