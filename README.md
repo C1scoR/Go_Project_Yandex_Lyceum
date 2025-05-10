@@ -344,6 +344,6 @@ func (h *AuthHandler) GetUserData(w http.ResponseWriter, r *http.Request)
 
 
 # **Спасибо за внимание**
-Вот вам лысый Роналдо:
-<img width="217" alt="image" src="https://github.com/user-attachments/assets/86485c28-477c-4b8c-83d3-5d3be4ce6e97" />
+Вот вам Роналдо с сыном:
+![Gif](https://media.tenor.com/some-valid-id.gif)
 
