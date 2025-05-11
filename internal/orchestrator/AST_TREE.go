@@ -25,10 +25,7 @@ func NewNode(value string) *Node {
 	}
 }
 
-<<<<<<< HEAD
 // рекурсивно обходит дерево и печатает все его значения
-=======
->>>>>>> 686799b (Pushing SuperCalculator)
 func PrintOrder(node *Node) {
 	if node == nil {
 		return
